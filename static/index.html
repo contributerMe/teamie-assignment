@@ -1,0 +1,1656 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kairos – AI Calendar</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+    /* Event blocks */
+    .event-block {
+      position: absolute;
+      left: 2px; right: 2px;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.3;
+      padding: 2px 5px;
+      overflow: hidden;
+      cursor: grab;
+      user-select: none;
+      transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
+    }
+    .event-block:active { cursor: grabbing; }
+    .event-block:hover { box-shadow: 0 4px 12px rgba(0,0,0,.15); z-index: 10; }
+    .event-dragging { opacity: 0.35 !important; transform: scale(0.98); }
+    .event-ghost { border: 2px dashed #6366f1 !important; background: rgba(99,102,241,0.12) !important; color: #4338ca !important; cursor: default !important; }
+    .event-conflict { outline: 2px solid #ef4444; outline-offset: 1px; }
+    .event-highlight { animation: highlight-pulse 1.2s ease; }
+    @keyframes highlight-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.6); }
+      50%  { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
+      100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+    }
+
+    /* Event delete button on hover */
+    .event-del-btn {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.95);
+      color: white;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+      z-index: 12;
+      transition: transform 0.15s, background-color 0.15s;
+    }
+    .event-block:hover .event-del-btn { display: flex; }
+    .event-del-btn:hover { background: #b91c1c; transform: scale(1.15); }
+
+    /* Drag over drop indicator */
+    .drop-indicator {
+      position: absolute;
+      left: 2px; right: 2px;
+      border: 2px dashed #6366f1;
+      background: rgba(99, 102, 241, 0.18);
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 15;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #4338ca;
+    }
+
+    /* Current time line */
+    #time-line {
+      position: absolute;
+      left: 0; right: 0;
+      height: 2px;
+      background: #ef4444;
+      z-index: 20;
+      pointer-events: none;
+    }
+    #time-line::before {
+      content: '';
+      position: absolute;
+      left: -4px; top: -4px;
+      width: 10px; height: 10px;
+      background: #ef4444;
+      border-radius: 50%;
+    }
+
+    /* Score ring */
+    .score-ring { transition: stroke-dashoffset 0.6s ease; }
+
+    /* Chat messages */
+    .chat-bubble-user { background: #e0e7ff; color: #3730a3; border-radius: 12px 12px 4px 12px; }
+    .chat-bubble-ai   { background: #f8fafc; color: #1e293b; border-radius: 12px 12px 12px 4px; border: 1px solid #e2e8f0; }
+
+    /* Smooth transitions */
+    .fade-in { animation: fadeIn 0.25s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    /* Loading dots */
+    .dot-pulse span { display: inline-block; animation: dotBounce 1.2s infinite; }
+    .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+    .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dotBounce { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
+  </style>
+</head>
+<body class="h-full bg-slate-50 text-slate-800 font-sans">
+
+<!-- ============================================================ HEADER -->
+<header class="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 shadow-sm sticky top-0 z-30">
+  <div class="flex items-center gap-2">
+    <svg class="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+    </svg>
+    <span class="font-bold text-lg tracking-tight text-indigo-700">Kairos</span>
+    <span class="text-xs text-slate-400 font-normal">AI Calendar</span>
+  </div>
+
+  <!-- Backend badge -->
+  <span id="badge-backend"
+    class="ml-2 px-2 py-0.5 text-xs rounded-full font-medium bg-slate-100 text-slate-500">
+    Loading…
+  </span>
+  <span id="badge-ai"
+    class="px-2 py-0.5 text-xs rounded-full font-medium bg-slate-100 text-slate-500 hidden">
+  </span>
+
+  <div class="flex-1"></div>
+
+  <!-- Week nav -->
+  <span id="week-label" class="text-sm font-medium text-slate-600 mr-2"></span>
+
+  <!-- Action buttons -->
+  <button onclick="openCreateModal()"
+    class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-3 py-1 rounded-full transition shadow-sm flex items-center gap-1.5"
+    title="Create a new calendar block">
+    <span class="text-sm font-bold leading-none">+</span> New Block
+  </button>
+  <button id="btn-google-connect"
+    class="hidden text-xs bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-3 py-1 rounded-full transition"
+    onclick="connectGoogle()">
+    Connect Google Calendar
+  </button>
+  <button onclick="switchBackend()"
+    class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1 rounded-full transition" title="Toggle demo/Google mode">
+    Switch backend
+  </button>
+  <button onclick="resetDemo()"
+    class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1 rounded-full transition">
+    Reset demo
+  </button>
+  <button onclick="undoLast()" id="btn-undo"
+    class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-full transition disabled:opacity-40 disabled:cursor-not-allowed">
+    ↩ Undo
+  </button>
+</header>
+
+<!-- ============================================================ MAIN LAYOUT -->
+<div class="flex h-[calc(100vh-57px)] overflow-hidden">
+
+  <!-- ======================================================== LEFT: CALENDAR (2/3) -->
+  <div class="w-2/3 flex flex-col overflow-hidden border-r border-slate-200">
+
+    <!-- Day header row -->
+    <div id="day-header" class="flex bg-white border-b border-slate-200 sticky top-0 z-10">
+      <div class="w-14 flex-shrink-0"></div><!-- gutter -->
+    </div>
+
+    <!-- Grid body -->
+    <div class="flex flex-1 overflow-y-auto" id="grid-scroll">
+      <!-- Time gutter -->
+      <div class="w-14 flex-shrink-0 bg-white border-r border-slate-100" id="time-gutter"></div>
+      <!-- Day columns -->
+      <div class="flex flex-1 relative" id="day-columns"></div>
+    </div>
+  </div>
+
+  <!-- ======================================================== RIGHT: AI PANEL (1/3) -->
+  <div class="w-1/3 flex flex-col bg-white overflow-hidden border-l border-slate-100">
+
+    <!-- ---- Health Card ---- -->
+    <div class="p-4 border-b border-slate-100 bg-gradient-to-br from-indigo-50 to-white" id="health-card">
+      <div class="flex items-center gap-3">
+        <!-- Score ring -->
+        <svg width="56" height="56" viewBox="0 0 56 56" class="flex-shrink-0">
+          <circle cx="28" cy="28" r="22" fill="none" stroke="#e2e8f0" stroke-width="5"/>
+          <circle id="score-ring" cx="28" cy="28" r="22" fill="none" stroke="#6366f1" stroke-width="5"
+            stroke-dasharray="138.2" stroke-dashoffset="138.2"
+            stroke-linecap="round" transform="rotate(-90 28 28)"
+            class="score-ring"/>
+          <text id="score-text" x="28" y="33" text-anchor="middle" font-size="13" font-weight="700" fill="#3730a3">–</text>
+        </svg>
+        <div class="min-w-0 flex-1">
+          <p class="text-xs text-slate-500 font-medium uppercase tracking-wide">Week Health</p>
+          <p id="health-summary" class="text-sm text-slate-700 mt-0.5 leading-snug">Loading…</p>
+        </div>
+      </div>
+      <!-- Score Progress Bar -->
+      <div class="mt-3">
+        <div class="flex justify-between text-xs text-slate-500 font-medium mb-1">
+          <span>Schedule Quality</span>
+          <span id="score-bar-text">0/100</span>
+        </div>
+        <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+          <div id="score-bar-fill" class="h-full bg-indigo-600 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+      </div>
+      <!-- Metric pills -->
+      <div class="mt-3 flex flex-wrap gap-2" id="health-pills"></div>
+      <!-- Issues list -->
+      <ul id="health-issues" class="mt-2 space-y-1 text-xs text-slate-500"></ul>
+    </div>
+
+    <!-- ---- Chat area ---- -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <!-- Messages -->
+      <div id="chat-messages" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
+
+      <!-- Example prompts -->
+      <div id="example-prompts" class="px-3 pb-2 flex flex-col gap-1">
+        <p class="text-xs text-slate-400 font-medium mb-1">Try asking…</p>
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick="sendPrompt(this)" class="prompt-chip text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full transition border border-indigo-100">
+            How's my week looking?
+          </button>
+          <button onclick="sendPrompt(this)" class="prompt-chip text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full transition border border-indigo-100">
+            Find 45 mins with Priya and Rahul before Friday
+          </button>
+          <button onclick="sendPrompt(this)" class="prompt-chip text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full transition border border-indigo-100">
+            Block 2 hours of focus time every morning this week
+          </button>
+          <button onclick="sendPrompt(this)" class="prompt-chip text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full transition border border-indigo-100">
+            Fix my Thursday
+          </button>
+          <button onclick="sendPrompt(this)" class="prompt-chip text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full transition border border-indigo-100">
+            Move my 3pm meeting to tomorrow
+          </button>
+        </div>
+      </div>
+
+      <!-- Chat input -->
+      <div class="p-3 border-t border-slate-100 bg-slate-50">
+        <form id="chat-form" onsubmit="sendMessage(event)" class="flex gap-2">
+          <input id="chat-input" type="text" placeholder="Ask anything about your schedule…"
+            class="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"/>
+          <button type="submit"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ SCRIPTS -->
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const GRID_START_HOUR = 8;
+const GRID_END_HOUR   = 19;
+const HOUR_HEIGHT_PX  = 64;
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+const TYPE_COLORS = {
+  meeting:  { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },
+  external: { bg: '#fef3c7', text: '#92400e', border: '#fcd34d' },
+  focus:    { bg: '#dcfce7', text: '#14532d', border: '#86efac' },
+  personal: { bg: '#fce7f3', text: '#831843', border: '#f9a8d4' },
+  other:    { bg: '#f3f4f6', text: '#374151', border: '#d1d5db' },
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let _events          = [];
+let _pendingProposal = null;
+let _pendingSlots    = null;
+let _slotContext     = null;  // { title, attendees, duration }
+let _backendName     = 'mock';
+let _geminiMode      = 'offline';
+let _draggedEvent    = null;
+let _dragOffsetY     = 0;
+
+// ============================================================
+// INIT
+// ============================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  buildGrid();
+  await Promise.all([loadStatus(), loadEvents(), loadBrief()]);
+  updateCurrentTimeLine();
+  setInterval(updateCurrentTimeLine, 60_000);
+  updateWeekLabel();
+
+  // Escape key closes modals
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeCreateModal();
+      closeEventDetailsModal();
+    }
+  });
+});
+
+function updateWeekLabel() {
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - today.getDay() + 1);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  document.getElementById('week-label').textContent = `${fmt(monday)} – ${fmt(friday)}`;
+}
+
+// ============================================================
+// GRID BUILDER
+// ============================================================
+function buildGrid() {
+  buildTimeGutter();
+  buildDayHeaders();
+  buildDayColumns();
+}
+
+function buildTimeGutter() {
+  const gutter = document.getElementById('time-gutter');
+  gutter.innerHTML = '';
+  const totalHeight = (GRID_END_HOUR - GRID_START_HOUR) * HOUR_HEIGHT_PX;
+  gutter.style.minHeight = totalHeight + 'px';
+
+  for (let h = GRID_START_HOUR; h <= GRID_END_HOUR; h++) {
+    const div = document.createElement('div');
+    div.style.position = 'absolute';
+    div.style.top = ((h - GRID_START_HOUR) * HOUR_HEIGHT_PX - 8) + 'px';
+    div.style.left = '0'; div.style.right = '0';
+    div.style.textAlign = 'right';
+    div.style.paddingRight = '6px';
+    div.style.fontSize = '10px';
+    div.style.color = '#94a3b8';
+    div.style.lineHeight = '1';
+    div.textContent = h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`;
+    gutter.style.position = 'relative';
+    gutter.appendChild(div);
+  }
+}
+
+function buildDayHeaders() {
+  const header = document.getElementById('day-header');
+  header.innerHTML = '<div class="w-14 flex-shrink-0"></div>';
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - today.getDay() + 1);
+
+  DAYS.forEach((day, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const isToday = d.toDateString() === today.toDateString();
+    const col = document.createElement('div');
+    col.className = 'flex-1 text-center py-2 text-xs font-medium border-l border-slate-100 ' +
+      (isToday ? 'text-indigo-600 bg-indigo-50/40' : 'text-slate-500');
+    col.innerHTML = `<span class="block">${day.slice(0,3)}</span>
+      <span class="inline-flex items-center justify-center w-6 h-6 mt-0.5 rounded-full text-sm font-semibold
+        ${isToday ? 'bg-indigo-600 text-white' : 'text-slate-700'}">${d.getDate()}</span>`;
+    header.appendChild(col);
+  });
+}
+
+function buildDayColumns() {
+  const container = document.getElementById('day-columns');
+  container.innerHTML = '';
+  const totalHeight = (GRID_END_HOUR - GRID_START_HOUR) * HOUR_HEIGHT_PX;
+  container.style.minHeight = totalHeight + 'px';
+
+  // Hour grid lines
+  for (let h = GRID_START_HOUR; h <= GRID_END_HOUR; h++) {
+    const line = document.createElement('div');
+    line.style.cssText = `position:absolute;left:0;right:0;top:${(h - GRID_START_HOUR) * HOUR_HEIGHT_PX}px;
+      border-top:1px solid #f1f5f9;z-index:0;`;
+    container.appendChild(line);
+  }
+
+  DAYS.forEach((day, i) => {
+    const col = document.createElement('div');
+    col.id = `day-col-${i}`;
+    col.className = 'flex-1 relative border-l border-slate-100 transition-colors cursor-pointer hover:bg-slate-50/40';
+    col.style.minHeight = totalHeight + 'px';
+    col.title = 'Click empty space to add a block, or drag & drop to reschedule';
+
+    // Click on empty space to add block
+    col.addEventListener('click', (e) => {
+      if (e.target.closest('.event-block')) return;
+      const rect = col.getBoundingClientRect();
+      const clickY = e.clientY - rect.top;
+      const totalHours = clickY / HOUR_HEIGHT_PX;
+      let h = Math.floor(GRID_START_HOUR + totalHours);
+      let m = Math.round(((GRID_START_HOUR + totalHours - h) * 60) / 30) * 30;
+      if (m === 60) { h += 1; m = 0; }
+      if (h < GRID_START_HOUR) h = GRID_START_HOUR;
+      if (h >= GRID_END_HOUR) h = GRID_END_HOUR - 1;
+
+      const monday = getMonday();
+      const targetDate = new Date(monday);
+      targetDate.setDate(monday.getDate() + i);
+      openCreateModal(targetDate, h, m);
+    });
+
+    // Drag-over to show drop preview
+    col.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!_draggedEvent) return;
+      e.dataTransfer.dropEffect = 'move';
+
+      const rect = col.getBoundingClientRect();
+      const clientY = e.clientY - (_dragOffsetY || 0);
+      const y = Math.max(0, clientY - rect.top);
+      const totalHours = y / HOUR_HEIGHT_PX;
+      let h = Math.floor(GRID_START_HOUR + totalHours);
+      let m = Math.round(((GRID_START_HOUR + totalHours - h) * 60) / 15) * 15;
+      if (m === 60) { h += 1; m = 0; }
+      if (h < GRID_START_HOUR) { h = GRID_START_HOUR; m = 0; }
+      if (h >= GRID_END_HOUR) { h = GRID_END_HOUR - 1; m = 0; }
+
+      const start = new Date(_draggedEvent.start);
+      const end = new Date(_draggedEvent.end);
+      const durMin = Math.round((end - start) / 60000) || 60;
+      showDropIndicator(col, h, m, durMin);
+    });
+
+    col.addEventListener('dragleave', (e) => {
+      if (!col.contains(e.relatedTarget)) {
+        removeDropIndicator();
+      }
+    });
+
+    col.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      removeDropIndicator();
+      const eventId = e.dataTransfer.getData('text/plain') || (_draggedEvent?.id);
+      if (!eventId) return;
+      const ev = _events.find(x => x.id === eventId);
+      if (!ev) return;
+
+      const rect = col.getBoundingClientRect();
+      const clientY = e.clientY - (_dragOffsetY || 0);
+      const y = Math.max(0, clientY - rect.top);
+      const totalHours = y / HOUR_HEIGHT_PX;
+      let h = Math.floor(GRID_START_HOUR + totalHours);
+      let m = Math.round(((GRID_START_HOUR + totalHours - h) * 60) / 15) * 15;
+      if (m === 60) { h += 1; m = 0; }
+      if (h < GRID_START_HOUR) { h = GRID_START_HOUR; m = 0; }
+      if (h >= GRID_END_HOUR) { h = GRID_END_HOUR - 1; m = 0; }
+
+      const monday = getMonday();
+      const targetDay = new Date(monday);
+      targetDay.setDate(monday.getDate() + i);
+      targetDay.setHours(h, m, 0, 0);
+
+      const durationMs = (new Date(ev.end) - new Date(ev.start));
+      const newEnd = new Date(targetDay.getTime() + durationMs);
+
+      await moveEvent(ev.id, targetDay, newEnd, ev.title);
+    });
+
+    container.appendChild(col);
+  });
+
+  // Current time line (only in today's column)
+  const timeLine = document.createElement('div');
+  timeLine.id = 'time-line';
+  timeLine.style.display = 'none';
+  container.appendChild(timeLine);
+}
+
+function showDropIndicator(col, h, m, durationMin) {
+  let ind = document.getElementById('drop-indicator');
+  if (!ind) {
+    ind = document.createElement('div');
+    ind.id = 'drop-indicator';
+    ind.className = 'drop-indicator';
+  }
+  const topPx = timeToPixel(h, m);
+  const heightPx = Math.max((durationMin / 60) * HOUR_HEIGHT_PX, 20);
+  ind.style.top = topPx + 'px';
+  ind.style.height = heightPx + 'px';
+  ind.textContent = `Drop at ${h}:${String(m).padStart(2, '0')}`;
+  if (ind.parentElement !== col) {
+    col.appendChild(ind);
+  }
+}
+
+function removeDropIndicator() {
+  const ind = document.getElementById('drop-indicator');
+  if (ind) ind.remove();
+}
+
+// ============================================================
+// EVENTS RENDERING
+// ============================================================
+function timeToPixel(h, m) {
+  return ((h + m / 60) - GRID_START_HOUR) * HOUR_HEIGHT_PX;
+}
+
+function getMonday() {
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - today.getDay() + 1);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
+function renderEvents(events, ghostProposal = null) {
+  // Clear existing event blocks
+  for (let i = 0; i < 5; i++) {
+    const col = document.getElementById(`day-col-${i}`);
+    if (col) {
+      Array.from(col.querySelectorAll('.event-block')).forEach(el => el.remove());
+    }
+  }
+
+  const monday = getMonday();
+  const allEvents = [...events];
+
+  // Add ghost events from proposal
+  let ghostIds = new Set();
+  if (ghostProposal) {
+    for (const change of ghostProposal.changes) {
+      if (change.action === 'create' || change.action === 'update') {
+        allEvents.push({ ...change.event, _ghost: true });
+        ghostIds.add(change.event.id + '_ghost');
+      }
+    }
+  }
+
+  for (const event of allEvents) {
+    const start = new Date(event.start);
+    const end = new Date(event.end);
+    const dayOffset = Math.floor((start - monday) / 86400000);
+    if (dayOffset < 0 || dayOffset > 4) continue;
+
+    const col = document.getElementById(`day-col-${dayOffset}`);
+    if (!col) continue;
+
+    const topPx = timeToPixel(start.getHours(), start.getMinutes());
+    const heightPx = Math.max(timeToPixel(end.getHours(), end.getMinutes()) - topPx, 20);
+
+    const colors = TYPE_COLORS[event.type] || TYPE_COLORS.other;
+    const block = document.createElement('div');
+    block.className = 'event-block group' + (event.has_conflict ? ' event-conflict' : '') + (event._ghost ? ' event-ghost' : '');
+    block.style.top = topPx + 'px';
+    block.style.height = heightPx + 'px';
+    block.style.backgroundColor = event._ghost ? 'rgba(99,102,241,0.08)' : colors.bg;
+    block.style.color = event._ghost ? '#4338ca' : colors.text;
+    block.style.borderLeft = `3px solid ${event._ghost ? '#6366f1' : colors.border}`;
+    block.dataset.eventId = event.id;
+
+    const durationMin = Math.round((end - start) / 60000);
+    const timeStr = `${start.getHours()}:${String(start.getMinutes()).padStart(2,'0')}`;
+    block.innerHTML = `
+      <div class="flex items-start justify-between pr-4">
+        <strong class="truncate block">${escHtml(event.title)}</strong>
+      </div>
+      ${heightPx > 30 ? `<span class="block opacity-75">${timeStr} · ${durationMin}m${event._ghost ? ' (proposed)' : ''}</span>` : ''}
+      ${!event._ghost ? `<button class="event-del-btn" title="Delete this block" onclick="deleteEventDirect('${event.id}', '${escHtml(event.title)}', event)">✕</button>` : ''}
+    `;
+    block.title = event._ghost
+      ? `PROPOSED: ${event.title}\n${timeStr} (${durationMin} min)`
+      : `${event.title}\n${timeStr} (${durationMin} min)${event.has_conflict ? '\n⚠️ CONFLICT' : ''}\n(Drag to reschedule, click for details)`;
+
+    if (!event._ghost) {
+      block.draggable = true;
+      block.addEventListener('dragstart', (e) => {
+        _draggedEvent = event;
+        e.dataTransfer.setData('text/plain', event.id);
+        block.classList.add('event-dragging');
+        const rect = block.getBoundingClientRect();
+        _dragOffsetY = e.clientY - rect.top;
+      });
+      block.addEventListener('dragend', () => {
+        block.classList.remove('event-dragging');
+        _draggedEvent = null;
+        removeDropIndicator();
+      });
+      block.addEventListener('click', (e) => {
+        if (e.target.closest('.event-del-btn')) return;
+        openEventDetailsModal(event);
+      });
+    }
+
+    col.appendChild(block);
+  }
+}
+
+function updateCurrentTimeLine() {
+  const timeLine = document.getElementById('time-line');
+  if (!timeLine) return;
+  const now = new Date();
+  const today = new Date();
+  const monday = getMonday();
+  const dayOffset = Math.floor((today - monday) / 86400000);
+  if (dayOffset < 0 || dayOffset > 4) {
+    timeLine.style.display = 'none';
+    return;
+  }
+
+  // Position within the day-columns container
+  const container = document.getElementById('day-columns');
+  const col = document.getElementById(`day-col-${dayOffset}`);
+  if (!col || !container) return;
+
+  const topPx = timeToPixel(now.getHours(), now.getMinutes());
+  const colLeft = col.offsetLeft;
+  const colWidth = col.offsetWidth;
+
+  timeLine.style.display = 'block';
+  timeLine.style.top = topPx + 'px';
+  timeLine.style.left = colLeft + 'px';
+  timeLine.style.width = colWidth + 'px';
+}
+
+// ============================================================
+// API CALLS
+// ============================================================
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    _backendName = d.backend;
+    updateBadges(d.backend, d.google_authed, d.gemini_available);
+  } catch {}
+}
+
+async function loadEvents() {
+  try {
+    const r = await fetch('/api/events');
+    const d = await r.json();
+    _events = d.events || [];
+    _backendName = d.backend;
+    renderEvents(_events, _pendingProposal);
+    if (d.backend === 'google' && !d.google_authed) {
+      document.getElementById('btn-google-connect').classList.remove('hidden');
+    }
+  } catch (e) {
+    console.error('loadEvents:', e);
+  }
+}
+
+async function loadBrief() {
+  try {
+    const r = await fetch('/api/brief');
+    const d = await r.json();
+    updateHealthCard(d);
+  } catch (e) {
+    console.error('loadBrief:', e);
+  }
+}
+
+function updateHealthCard(d) {
+  // Score ring animation
+  const circumference = 138.2;
+  const pct = Math.min(Math.max(d.score, 0), 100) / 100;
+  const offset = circumference * (1 - pct);
+  const ring = document.getElementById('score-ring');
+  ring.style.strokeDashoffset = offset;
+
+  // Color based on score
+  const color = d.score >= 70 ? '#22c55e' : d.score >= 45 ? '#f59e0b' : '#ef4444';
+  ring.style.stroke = color;
+  document.getElementById('score-text').textContent = d.score;
+  document.getElementById('score-text').style.fill = color;
+
+  const barFill = document.getElementById('score-bar-fill');
+  if (barFill) {
+    barFill.style.width = Math.min(Math.max(d.score, 0), 100) + '%';
+    barFill.style.backgroundColor = color;
+  }
+  const barText = document.getElementById('score-bar-text');
+  if (barText) barText.textContent = `${d.score}/100`;
+
+  document.getElementById('health-summary').textContent = d.summary || '';
+
+  // Pills
+  const pills = document.getElementById('health-pills');
+  pills.innerHTML = '';
+  const metrics = [
+    { label: 'Meetings', value: d.meeting_hours + 'h', warn: d.meeting_hours > 15 },
+    { label: 'Focus', value: d.focus_hours + 'h', warn: d.focus_hours < 2 },
+    { label: 'B2B', value: d.back_to_back_count, warn: d.back_to_back_count > 2 },
+    { label: 'Conflicts', value: d.conflict_count, warn: d.conflict_count > 0 },
+  ];
+  for (const m of metrics) {
+    const span = document.createElement('span');
+    span.className = `text-xs px-2 py-0.5 rounded-full font-medium ${
+      m.warn ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`;
+    span.textContent = `${m.label}: ${m.value}`;
+    pills.appendChild(span);
+  }
+
+  // Issues
+  const issuesList = document.getElementById('health-issues');
+  issuesList.innerHTML = '';
+  for (const issue of (d.issues || [])) {
+    const li = document.createElement('li');
+    li.className = 'flex items-start gap-1';
+    li.innerHTML = `<span class="text-amber-500 mt-0.5">⚠</span><span>${escHtml(issue)}</span>`;
+    issuesList.appendChild(li);
+  }
+}
+
+function updateBadges(backend, googleAuthed, geminiAvail) {
+  const badgeBackend = document.getElementById('badge-backend');
+  const badgeAI = document.getElementById('badge-ai');
+
+  if (backend === 'google' && googleAuthed) {
+    badgeBackend.textContent = '🗓 Google Calendar (live)';
+    badgeBackend.className = 'ml-2 px-2 py-0.5 text-xs rounded-full font-medium bg-blue-100 text-blue-700';
+  } else if (backend === 'google' && !googleAuthed) {
+    badgeBackend.textContent = '🔒 Google (not connected)';
+    badgeBackend.className = 'ml-2 px-2 py-0.5 text-xs rounded-full font-medium bg-orange-100 text-orange-700';
+    document.getElementById('btn-google-connect').classList.remove('hidden');
+  } else {
+    badgeBackend.textContent = '🧪 Demo data';
+    badgeBackend.className = 'ml-2 px-2 py-0.5 text-xs rounded-full font-medium bg-slate-100 text-slate-500';
+  }
+
+  badgeAI.classList.remove('hidden');
+  if (geminiAvail) {
+    badgeAI.textContent = '✨ Gemini';
+    badgeAI.className = 'px-2 py-0.5 text-xs rounded-full font-medium bg-purple-100 text-purple-700';
+  } else {
+    badgeAI.textContent = '⚙ Offline mode';
+    badgeAI.className = 'px-2 py-0.5 text-xs rounded-full font-medium bg-slate-100 text-slate-500';
+  }
+}
+
+// ============================================================
+// CHAT
+// ============================================================
+function sendPrompt(btn) {
+  const text = btn.textContent.trim();
+  document.getElementById('chat-input').value = text;
+  sendMessage(null);
+}
+
+async function sendMessage(event) {
+  if (event) event.preventDefault();
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+
+  // Hide example prompts after first message
+  document.getElementById('example-prompts').classList.add('hidden');
+
+  appendUserMessage(message);
+  const loadingEl = appendLoadingMessage();
+
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    const d = await r.json();
+    loadingEl.remove();
+    _geminiMode = d.mode;
+    appendAssistantMessage(d);
+  } catch (e) {
+    loadingEl.remove();
+    appendErrorMessage('Network error – please try again.');
+  }
+}
+
+function appendUserMessage(text) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'flex justify-end fade-in';
+  div.innerHTML = `<div class="chat-bubble-user px-3 py-2 max-w-[85%] text-sm">${escHtml(text)}</div>`;
+  container.appendChild(div);
+  scrollChat();
+}
+
+function appendLoadingMessage() {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'flex justify-start fade-in';
+  div.innerHTML = `<div class="chat-bubble-ai px-3 py-2 text-sm dot-pulse flex gap-1 items-center">
+    <span class="w-2 h-2 bg-indigo-400 rounded-full inline-block"></span>
+    <span class="w-2 h-2 bg-indigo-400 rounded-full inline-block"></span>
+    <span class="w-2 h-2 bg-indigo-400 rounded-full inline-block"></span>
+  </div>`;
+  container.appendChild(div);
+  scrollChat();
+  return div;
+}
+
+function appendErrorMessage(text) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'fade-in';
+  div.innerHTML = `<div class="bg-red-50 text-red-700 border border-red-200 rounded-xl px-3 py-2 text-sm">${escHtml(text)}</div>`;
+  container.appendChild(div);
+  scrollChat();
+}
+
+function appendAssistantMessage(d) {
+  const container = document.getElementById('chat-messages');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'fade-in space-y-2';
+
+  // Mode badge
+  const modeBadge = d.mode === 'gemini'
+    ? '<span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-medium">✨ Gemini</span>'
+    : '<span class="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">⚙ Offline</span>';
+
+  // Main bubble
+  const bubble = document.createElement('div');
+  bubble.className = 'flex justify-start';
+  bubble.innerHTML = `<div class="chat-bubble-ai px-3 py-2 max-w-[90%] text-sm space-y-1">
+    <div class="flex items-center gap-2 mb-1">${modeBadge}</div>
+    <div>${markdownToHtml(d.content)}</div>
+  </div>`;
+  wrapper.appendChild(bubble);
+
+  // Slot options
+  if (d.slot_options && d.slot_options.length > 0) {
+    _pendingSlots = d.slot_options;
+    _slotContext = extractSlotContext(d.content);
+    const slotsDiv = renderSlotCards(d.slot_options);
+    wrapper.appendChild(slotsDiv);
+    // Show ghost on calendar for first slot
+    if (d.slot_options[0]) {
+      const ghostEvent = {
+        id: 'ghost-slot-0', title: 'Proposed meeting',
+        start: d.slot_options[0].start, end: d.slot_options[0].end,
+        type: 'meeting', _ghost: true
+      };
+      renderEvents(_events, { changes: [{ action: 'create', event: ghostEvent }] });
+    }
+  }
+
+  // Proposal card (only if there are actual changes)
+  if (d.proposal && d.proposal.changes && d.proposal.changes.length > 0) {
+    _pendingProposal = d.proposal;
+    const proposalDiv = renderProposalCard(d.proposal);
+    wrapper.appendChild(proposalDiv);
+    // Show ghosts on calendar
+    renderEvents(_events, d.proposal);
+  }
+
+  container.appendChild(wrapper);
+  scrollChat();
+}
+
+// ============================================================
+// SLOT CARDS
+// ============================================================
+function extractSlotContext(content) {
+  const durationMatch = content.match(/(\d+)[\s-]min/i);
+  const duration = durationMatch ? parseInt(durationMatch[1]) : 30;
+  const attendeeMatches = [...content.matchAll(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi)];
+  const attendees = attendeeMatches.map(m => m[1]);
+
+  // Generate an intelligent default title from attendees or keywords
+  const detectedNames = [];
+  ['Priya', 'Rahul', 'Ananya', 'Vikram'].forEach(name => {
+    if (new RegExp(name, 'i').test(content)) detectedNames.push(name);
+  });
+  let smartTitle = 'New Meeting';
+  if (detectedNames.length > 0) {
+    smartTitle = `Meeting with ${detectedNames.join(' & ')}`;
+  } else if (attendees.length > 0) {
+    smartTitle = `Meeting with ${attendees.map(a => a.split('@')[0]).join(', ')}`;
+  }
+
+  return { title: smartTitle, attendees, duration };
+}
+
+function renderSlotCards(slots) {
+  const div = document.createElement('div');
+  div.className = 'ml-2 space-y-2.5 mt-1';
+
+  const ctx = _slotContext || { title: 'New Meeting', attendees: [], duration: 30 };
+
+  // Editable Meeting Name Header Box
+  const titleBox = document.createElement('div');
+  titleBox.className = 'bg-white border border-indigo-200 rounded-lg p-2.5 shadow-sm';
+  titleBox.innerHTML = `
+    <div class="flex items-center justify-between mb-1">
+      <label class="text-xs font-semibold text-indigo-900 flex items-center gap-1.5">
+        <span>✏️</span> Proposed Meeting Name:
+      </label>
+      <span class="text-[10px] text-slate-400">Editable</span>
+    </div>
+    <input id="slot-custom-title" type="text" value="${escHtml(ctx.title)}" 
+      class="w-full text-xs font-medium text-slate-800 border border-slate-200 rounded px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 focus:bg-white"
+      placeholder="e.g. Strategy Sync, 1:1 Catchup" />
+  `;
+  div.appendChild(titleBox);
+
+  // Live update ghost on calendar as user types meeting name
+  const inputEl = titleBox.querySelector('#slot-custom-title');
+  inputEl.addEventListener('input', (e) => {
+    const val = e.target.value.trim() || 'Proposed meeting';
+    if (_slotContext) _slotContext.title = val;
+    const ghost = document.querySelector('.event-ghost');
+    if (ghost) {
+      const strong = ghost.querySelector('strong');
+      if (strong) strong.textContent = val;
+    }
+  });
+
+  const slotsHeader = document.createElement('p');
+  slotsHeader.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wide';
+  slotsHeader.textContent = 'Recommended Slots (click to propose):';
+  div.appendChild(slotsHeader);
+
+  slots.forEach((slot, i) => {
+    const start = new Date(slot.start);
+    const end = new Date(slot.end);
+    const durationMin = Math.round((end - start) / 60000);
+    const timeStr = start.toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    });
+    const scoreColor = slot.score >= 0.7 ? 'text-green-600' : slot.score >= 0.4 ? 'text-amber-600' : 'text-red-500';
+
+    const card = document.createElement('button');
+    card.className = 'w-full text-left bg-white border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 rounded-lg p-3 transition text-sm';
+    card.dataset.slotIndex = i;
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <span class="font-medium text-slate-700">${timeStr}</span>
+          <span class="text-slate-400 text-xs ml-1">${durationMin}m</span>
+        </div>
+        <span class="text-xs font-bold ${scoreColor}">${Math.round(slot.score * 100)}%</span>
+      </div>
+      <p class="text-xs text-slate-400 mt-1">${escHtml(slot.why)}</p>
+    `;
+    card.onclick = () => selectSlot(i, slot);
+    div.appendChild(card);
+  });
+  return div;
+}
+
+async function selectSlot(index, slot) {
+  const customTitleInput = document.getElementById('slot-custom-title');
+  const chosenTitle = customTitleInput ? customTitleInput.value.trim() : (_slotContext?.title || 'New Meeting');
+  const ctx = _slotContext || { title: chosenTitle, attendees: [], duration: 30 };
+  ctx.title = chosenTitle || 'New Meeting';
+
+  try {
+    const r = await fetch('/api/slot/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slot,
+        title: ctx.title,
+        attendees: ctx.attendees,
+      }),
+    });
+    const d = await r.json();
+    if (d.proposal) {
+      _pendingProposal = d.proposal;
+      _pendingSlots = null;
+      const container = document.getElementById('chat-messages');
+      const wrapper = document.createElement('div');
+      wrapper.className = 'fade-in';
+      wrapper.appendChild(renderProposalCard(d.proposal));
+      container.appendChild(wrapper);
+      scrollChat();
+      renderEvents(_events, d.proposal);
+    }
+  } catch (e) {
+    appendErrorMessage('Could not create proposal for selected slot.');
+  }
+}
+
+// ============================================================
+// PROPOSAL CARD
+// ============================================================
+function renderProposalCard(proposal) {
+  const div = document.createElement('div');
+  div.className = 'bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-3 text-sm';
+  div.dataset.proposalId = proposal.id;
+
+  // Header
+  div.innerHTML = `
+    <div class="flex items-start gap-2">
+      <span class="text-lg">📋</span>
+      <div class="flex-1">
+        <p class="font-semibold text-indigo-800 proposal-summary">${escHtml(proposal.summary)}</p>
+        <p class="text-xs text-indigo-600 mt-0.5 italic">"${escHtml(proposal.reasoning)}"</p>
+      </div>
+    </div>
+  `;
+
+  // Changes diff
+  const changesDiv = document.createElement('div');
+  changesDiv.className = 'space-y-1.5';
+  for (const change of proposal.changes) {
+    const ev = change.event;
+    const start = new Date(ev.start);
+    const end = new Date(ev.end);
+    const timeStr = start.toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    }) + ' – ' + end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+    let icon, color, label;
+    if (change.action === 'create') { icon = '➕'; color = 'bg-green-50 border-green-200 text-green-800'; label = 'Add'; }
+    else if (change.action === 'update') { icon = '✏️'; color = 'bg-amber-50 border-amber-200 text-amber-800'; label = 'Move'; }
+    else { icon = '🗑'; color = 'bg-red-50 border-red-200 text-red-800'; label = 'Remove'; }
+
+    const changeRow = document.createElement('div');
+    changeRow.className = `${color} border rounded-lg p-2 text-xs`;
+    let beforeAfter = '';
+    if (change.before) {
+      const bStart = new Date(change.before.start);
+      const beforeStr = bStart.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+      beforeAfter = `<span class="line-through opacity-60 mr-1">${beforeStr}</span>→ `;
+    }
+    changeRow.innerHTML = `<span class="mr-1">${icon}</span><strong>${label}:</strong> <span class="event-title-display">${escHtml(ev.title)}</span> · ${beforeAfter}${timeStr}`;
+
+    // Editable name input right inside the proposal card
+    if (change.action === 'create' || change.action === 'update') {
+      const titleEdit = document.createElement('div');
+      titleEdit.className = 'mt-2 flex items-center gap-2 pt-1 border-t border-slate-200/60';
+      titleEdit.innerHTML = `
+        <span class="text-[11px] font-semibold text-slate-500 whitespace-nowrap">Meeting Name:</span>
+        <input type="text" value="${escHtml(ev.title)}" 
+          class="proposal-title-input flex-1 text-xs border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 font-medium text-slate-800" 
+          placeholder="Edit meeting title..." />
+      `;
+      const input = titleEdit.querySelector('input');
+      input.addEventListener('input', (e) => {
+        const val = e.target.value.trim() || 'Untitled';
+        ev.title = val;
+        proposal.summary = `${change.action === 'create' ? 'Schedule' : 'Move'} '${val}'`;
+        const summaryEl = div.querySelector('.proposal-summary');
+        if (summaryEl) summaryEl.textContent = proposal.summary;
+        const titleSpan = changeRow.querySelector('.event-title-display');
+        if (titleSpan) titleSpan.textContent = val;
+        // Update ghost block on the calendar in real-time
+        renderEvents(_events, proposal);
+      });
+      changeRow.appendChild(titleEdit);
+    }
+
+    changesDiv.appendChild(changeRow);
+  }
+  div.appendChild(changesDiv);
+
+  // Approve / Reject buttons
+  const btnRow = document.createElement('div');
+  btnRow.className = 'flex gap-2';
+  const approveBtn = document.createElement('button');
+  approveBtn.className = 'flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 rounded-lg transition shadow-sm';
+  approveBtn.textContent = '✓ Approve';
+  approveBtn.onclick = () => approveProposal(proposal.id, div);
+
+  const rejectBtn = document.createElement('button');
+  rejectBtn.className = 'flex-1 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-xs font-semibold py-2 rounded-lg transition';
+  rejectBtn.textContent = '✗ Reject';
+  rejectBtn.onclick = () => rejectProposal(proposal.id, div);
+
+  btnRow.appendChild(approveBtn);
+  btnRow.appendChild(rejectBtn);
+  div.appendChild(btnRow);
+
+  return div;
+}
+
+async function approveProposal(proposalId, cardEl) {
+  const titleInput = cardEl.querySelector('.proposal-title-input');
+  const customTitle = titleInput ? titleInput.value.trim() : null;
+
+  try {
+    const r = await fetch('/api/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposal_id: proposalId, custom_title: customTitle }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      appendErrorMessage(err.detail || 'Failed to apply proposal.');
+      return;
+    }
+    const d = await r.json();
+    _pendingProposal = null;
+    _events = d.events || _events;
+    renderEvents(_events);
+    updateHealthCard(d.health);
+    // Highlight changed events
+    for (const change of (_pendingProposal?.changes || [])) {
+      const el = document.querySelector(`[data-event-id="${change.event.id}"]`);
+      if (el) el.classList.add('event-highlight');
+    }
+    // Replace card with success
+    cardEl.innerHTML = `<div class="text-green-700 text-sm font-medium flex items-center gap-2">
+      <span>✅</span> Applied: ${escHtml(d.message)}
+    </div>`;
+    document.getElementById('btn-undo').disabled = false;
+  } catch (e) {
+    appendErrorMessage('Network error when applying proposal.');
+  }
+}
+
+async function rejectProposal(proposalId, cardEl) {
+  try {
+    await fetch('/api/reject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposal_id: proposalId }),
+    });
+    _pendingProposal = null;
+    renderEvents(_events);  // Remove ghosts
+    cardEl.innerHTML = `<div class="text-slate-500 text-sm flex items-center gap-2">
+      <span>🚫</span> Proposal rejected.
+    </div>`;
+  } catch (e) {
+    appendErrorMessage('Network error when rejecting proposal.');
+  }
+}
+
+// ============================================================
+// HEADER ACTIONS
+// ============================================================
+async function resetDemo() {
+  if (!confirm('Reset all calendar data to demo state?')) return;
+  try {
+    const r = await fetch('/api/reset', { method: 'POST' });
+    const d = await r.json();
+    _pendingProposal = null;
+    _pendingSlots = null;
+    await loadEvents();
+    await loadBrief();
+    document.getElementById('chat-messages').innerHTML = '';
+    document.getElementById('example-prompts').classList.remove('hidden');
+    showToast('Demo data reset.');
+  } catch (e) {
+    showToast('Reset failed.', true);
+  }
+}
+
+async function undoLast() {
+  try {
+    const r = await fetch('/api/undo', { method: 'POST' });
+    if (!r.ok) {
+      const err = await r.json();
+      showToast(err.detail || 'Nothing to undo.', true);
+      return;
+    }
+    const d = await r.json();
+    _events = d.events || _events;
+    renderEvents(_events);
+    updateHealthCard(d.health);
+    showToast('Undone: ' + d.message);
+  } catch (e) {
+    showToast('Undo failed.', true);
+  }
+}
+
+async function switchBackend() {
+  const next = _backendName === 'mock' ? 'google' : 'mock';
+  try {
+    const r = await fetch('/api/backend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backend: next }),
+    });
+    const d = await r.json();
+    _backendName = d.backend;
+    updateBadges(d.backend, d.google_authed, false);
+    await loadEvents();
+    await loadBrief();
+    showToast(`Switched to ${next} backend.`);
+  } catch (e) {
+    showToast('Failed to switch backend.', true);
+  }
+}
+
+async function connectGoogle() {
+  showToast('Opening Google OAuth flow…');
+  try {
+    const r = await fetch('/auth/google');
+    const d = await r.json();
+    if (d.status === 'authenticated') {
+      showToast('Google Calendar connected!');
+      document.getElementById('btn-google-connect').classList.add('hidden');
+      await loadStatus();
+      await loadEvents();
+      await loadBrief();
+    }
+  } catch (e) {
+    showToast('OAuth failed – check server logs.', true);
+  }
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function scrollChat() {
+  const c = document.getElementById('chat-messages');
+  c.scrollTop = c.scrollHeight;
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function markdownToHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code class="bg-slate-100 px-1 rounded text-xs">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+let _toastTimeout = null;
+function showToast(msg, isError = false) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full text-sm font-medium shadow-lg transition-all duration-300';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.className = `fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full text-sm font-medium shadow-lg transition-all duration-300 ${
+    isError ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+  }`;
+  toast.style.opacity = '1';
+  if (_toastTimeout) clearTimeout(_toastTimeout);
+  _toastTimeout = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+}
+
+// ============================================================
+// MANUAL EVENT ACTIONS & DRAG-AND-DROP
+// ============================================================
+function formatLocalISO(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
+let _currentEditingEventId = null;
+
+async function createEvent(payload) {
+  try {
+    const r = await fetch('/api/events/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      showToast(err.detail || 'Failed to create block.', true);
+      return;
+    }
+    const d = await r.json();
+    _events = d.events || _events;
+    renderEvents(_events);
+    updateHealthCard(d.health);
+    document.getElementById('btn-undo').disabled = false;
+    showToast(d.message);
+  } catch (e) {
+    showToast('Failed to create block.', true);
+  }
+}
+
+async function moveEvent(eventId, newStart, newEnd, title) {
+  try {
+    const r = await fetch(`/api/events/${eventId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        new_start: formatLocalISO(newStart),
+        new_end: formatLocalISO(newEnd),
+      }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      showToast(err.detail || 'Failed to move block.', true);
+      return;
+    }
+    const d = await r.json();
+    _events = d.events || _events;
+    renderEvents(_events);
+    updateHealthCard(d.health);
+    document.getElementById('btn-undo').disabled = false;
+    const timeStr = newStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const dayName = DAYS[newStart.getDay() === 0 ? 6 : newStart.getDay() - 1] || 'day';
+    showToast(`Moved '${title}' to ${dayName} at ${timeStr}`);
+  } catch (e) {
+    showToast('Failed to move block.', true);
+  }
+}
+
+async function updateEventDetails(eventId, title, desc, eventType) {
+  try {
+    const r = await fetch(`/api/events/${eventId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        description: desc,
+        type: eventType,
+      }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      showToast(err.detail || 'Failed to update meeting.', true);
+      return;
+    }
+    const d = await r.json();
+    _events = d.events || _events;
+    renderEvents(_events);
+    updateHealthCard(d.health);
+    document.getElementById('btn-undo').disabled = false;
+    showToast(d.message || `Updated '${title}'`);
+  } catch (e) {
+    showToast('Failed to update meeting.', true);
+  }
+}
+
+async function deleteEventDirect(eventId, title, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  closeEventDetailsModal();
+  try {
+    const r = await fetch(`/api/events/${eventId}`, {
+      method: 'DELETE',
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      showToast(err.detail || 'Failed to delete block.', true);
+      return;
+    }
+    const d = await r.json();
+    _events = d.events || _events;
+    renderEvents(_events);
+    updateHealthCard(d.health);
+    document.getElementById('btn-undo').disabled = false;
+    showToast(`Deleted '${title}'. Click ↩ Undo to restore.`);
+  } catch (e) {
+    showToast('Failed to delete block.', true);
+  }
+}
+
+function openCreateModal(dateObj = null, startHour = 10, startMin = 0) {
+  const modal = document.getElementById('modal-create-event');
+  if (!modal) return;
+
+  const monday = getMonday();
+
+  let dayIndex = 0;
+  if (dateObj) {
+    dayIndex = Math.floor((dateObj - monday) / 86400000);
+    if (dayIndex < 0 || dayIndex > 4) dayIndex = 0;
+  }
+
+  document.getElementById('create-day').value = dayIndex;
+  document.getElementById('create-start-time').value = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+  document.getElementById('create-title').value = '';
+  document.getElementById('create-desc').value = '';
+  document.getElementById('create-duration').value = '30';
+  document.getElementById('create-type').value = 'meeting';
+
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('create-title').focus(), 50);
+}
+
+function closeCreateModal() {
+  const modal = document.getElementById('modal-create-event');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function handleCreateModalSubmit(e) {
+  e.preventDefault();
+  const title = document.getElementById('create-title').value.trim();
+  if (!title) return;
+
+  const type = document.getElementById('create-type').value;
+  const dayIndex = parseInt(document.getElementById('create-day').value);
+  const timeVal = document.getElementById('create-start-time').value; // "HH:MM"
+  const durationMin = parseInt(document.getElementById('create-duration').value);
+  const desc = document.getElementById('create-desc').value.trim();
+
+  const [hStr, mStr] = timeVal.split(':');
+  const h = parseInt(hStr);
+  const m = parseInt(mStr);
+
+  const monday = getMonday();
+  const startDt = new Date(monday);
+  startDt.setDate(monday.getDate() + dayIndex);
+  startDt.setHours(h, m, 0, 0);
+
+  const endDt = new Date(startDt.getTime() + durationMin * 60000);
+
+  closeCreateModal();
+
+  await createEvent({
+    title,
+    type,
+    start: formatLocalISO(startDt),
+    end: formatLocalISO(endDt),
+    description: desc || null,
+  });
+}
+
+function openEventDetailsModal(event) {
+  _currentEditingEventId = event.id;
+  const modal = document.getElementById('modal-event-details');
+  if (!modal) return;
+
+  const start = new Date(event.start);
+  const end = new Date(event.end);
+  const durationMin = Math.round((end - start) / 60000);
+  const timeStr = start.toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit'
+  }) + ' – ' + end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ` (${durationMin} min)`;
+
+  const titleInput = document.getElementById('detail-title-input');
+  titleInput.value = event.title;
+  titleInput.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveEventDetails();
+    }
+  };
+
+  document.getElementById('detail-time').textContent = timeStr;
+
+  const typeSelect = document.getElementById('detail-type-select');
+  if (typeSelect) typeSelect.value = event.type;
+
+  // Attendees
+  const attRow = document.getElementById('detail-attendees-row');
+  const attSpan = document.getElementById('detail-attendees');
+  if (event.attendees && event.attendees.length > 0) {
+    attRow.classList.remove('hidden');
+    attSpan.textContent = event.attendees.map(a => a.name || a.email).join(', ');
+  } else {
+    attRow.classList.add('hidden');
+  }
+
+  // Description input
+  const descInput = document.getElementById('detail-desc-input');
+  if (descInput) descInput.value = event.description || '';
+
+  // Conflict warning
+  const confRow = document.getElementById('detail-conflict-row');
+  if (event.has_conflict) {
+    confRow.classList.remove('hidden');
+  } else {
+    confRow.classList.add('hidden');
+  }
+
+  // Delete button
+  const delBtn = document.getElementById('btn-detail-delete');
+  delBtn.onclick = (e) => deleteEventDirect(event.id, event.title, e);
+
+  // Save button
+  const saveBtn = document.getElementById('btn-detail-save');
+  saveBtn.onclick = () => saveEventDetails();
+
+  modal.classList.remove('hidden');
+  setTimeout(() => titleInput.select(), 50);
+}
+
+function closeEventDetailsModal() {
+  const modal = document.getElementById('modal-event-details');
+  if (modal) modal.classList.add('hidden');
+  _currentEditingEventId = null;
+}
+
+async function saveEventDetails() {
+  if (!_currentEditingEventId) return;
+  const titleInput = document.getElementById('detail-title-input');
+  const newTitle = titleInput.value.trim();
+  if (!newTitle) {
+    showToast('Meeting title cannot be empty', true);
+    return;
+  }
+  const descInput = document.getElementById('detail-desc-input');
+  const newDesc = descInput ? descInput.value.trim() || null : null;
+  const typeSelect = document.getElementById('detail-type-select');
+  const newType = typeSelect ? typeSelect.value : null;
+
+  const id = _currentEditingEventId;
+  closeEventDetailsModal();
+  await updateEventDetails(id, newTitle, newDesc, newType);
+}
+</script>
+
+<!-- ============================================================ MODAL: CREATE BLOCK -->
+<div id="modal-create-event" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden"
+  onclick="if(event.target===this) closeCreateModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-slate-100 fade-in m-4">
+    <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+      <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+        <span class="text-indigo-600">➕</span> Add Calendar Block
+      </h3>
+      <button onclick="closeCreateModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none">&times;</button>
+    </div>
+
+    <form onsubmit="handleCreateModalSubmit(event)" class="space-y-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Title</label>
+        <input id="create-title" type="text" required placeholder="e.g. Sprint Sync, Deep Work"
+          class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Type</label>
+          <select id="create-type" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+            <option value="meeting">Meeting (Internal)</option>
+            <option value="focus">Focus Block</option>
+            <option value="external">External Client</option>
+            <option value="personal">Personal</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Day</label>
+          <select id="create-day" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+            <option value="0">Monday</option>
+            <option value="1">Tuesday</option>
+            <option value="2">Wednesday</option>
+            <option value="3">Thursday</option>
+            <option value="4">Friday</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Start Time</label>
+          <input id="create-start-time" type="time" required value="10:00" step="900"
+            class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Duration</label>
+          <select id="create-duration" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+            <option value="15">15 mins</option>
+            <option value="30" selected>30 mins</option>
+            <option value="45">45 mins</option>
+            <option value="60">1 hour</option>
+            <option value="90">1.5 hours</option>
+            <option value="120">2 hours</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Description (optional)</label>
+        <input id="create-desc" type="text" placeholder="Agenda or notes..."
+          class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      </div>
+
+      <div class="flex gap-2 justify-end pt-3 border-t border-slate-100">
+        <button type="button" onclick="closeCreateModal()"
+          class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition">
+          Cancel
+        </button>
+        <button type="submit" id="btn-submit-create"
+          class="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition shadow-sm">
+          Add Block
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ MODAL: EVENT DETAILS -->
+<div id="modal-event-details" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden"
+  onclick="if(event.target===this) closeEventDetailsModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4 border border-slate-100 fade-in m-4">
+    <div class="flex items-start justify-between border-b border-slate-100 pb-3">
+      <div class="flex-1 mr-2">
+        <div class="flex items-center gap-2 mb-1.5">
+          <select id="detail-type-select" class="text-[11px] font-semibold border border-slate-200 rounded px-2 py-0.5 bg-slate-50 text-slate-700 focus:outline-none">
+            <option value="meeting">Meeting</option>
+            <option value="focus">Focus Block</option>
+            <option value="external">External Client</option>
+            <option value="personal">Personal</option>
+          </select>
+          <span class="text-[10px] text-slate-400">Edit Name</span>
+        </div>
+        <input id="detail-title-input" type="text" required
+          class="w-full text-base font-bold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50 focus:bg-white transition"
+          placeholder="Meeting title..." />
+      </div>
+      <button onclick="closeEventDetailsModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none mt-1">&times;</button>
+    </div>
+
+    <div class="space-y-2.5 text-xs text-slate-600">
+      <div class="flex items-center gap-2">
+        <span class="text-base">🕒</span>
+        <span id="detail-time" class="font-medium text-slate-700">Time</span>
+      </div>
+      <div id="detail-attendees-row" class="flex items-start gap-2 hidden">
+        <span class="text-base">👥</span>
+        <span id="detail-attendees" class="font-medium text-slate-700">Attendees</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-base">📝</span>
+        <input id="detail-desc-input" type="text" placeholder="Notes or agenda..."
+          class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400 text-slate-700 bg-slate-50 focus:bg-white" />
+      </div>
+      <div id="detail-conflict-row" class="p-2 bg-red-50 text-red-700 rounded-lg border border-red-200 hidden">
+        ⚠️ <strong>Conflict:</strong> This event overlaps with another event on your calendar.
+      </div>
+    </div>
+
+    <div class="flex gap-2 justify-between pt-3 border-t border-slate-100">
+      <button type="button" id="btn-detail-delete"
+        class="px-3 py-2 text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg transition flex items-center gap-1.5">
+        <span>🗑</span> Delete
+      </button>
+      <div class="flex gap-2">
+        <button type="button" onclick="closeEventDetailsModal()"
+          class="px-3 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition">
+          Cancel
+        </button>
+        <button type="button" id="btn-detail-save"
+          class="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition shadow-sm flex items-center gap-1">
+          <span>💾</span> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

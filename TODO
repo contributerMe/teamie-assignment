@@ -1,0 +1,23 @@
+# Kairos – Project Tasks & Roadmap
+
+## Completed Features
+- [x] Core Calendar Grid & Real-time Current Time Line
+- [x] AI Chat Agent with Gemini 7-Tool Function Calling & Cascading Fallback Chain (`gemini-3.5-flash-lite` -> `gemini-4-hydrogen` -> `gemini-3.8-flash` -> offline fallback)
+- [x] Real-time Structured LLM Execution Logging (inputs, model, tool arguments, outputs)
+- [x] Strict Focus Block Planning (`preferred_window="morning"` stays strictly in morning 9-13)
+- [x] Proposal Isolation per Chat Turn (no ghost proposals or stale proposal reuse)
+- [x] Interactive Drag & Drop Calendar Block Rescheduling (snapped to 15m intervals with live drop previews)
+- [x] Manual Event Creation (+ New Block button and direct click-on-grid)
+- [x] Direct Meeting / Block Name Editing & Inline Details Modal
+- [x] Manual Event Deletion (hover ✕ button and modal delete)
+- [x] Universal Undo Stack (reverts AI proposals, manual adds, moves, renames, and deletes)
+- [x] Comprehensive Documentation (Reviewer-Ready README.md & In-Depth THOUGHT_PROCESS.md)
+
+## Next Roadmap Items
+1. **User Preferences & Configurability Modal**: Profile form allowing users to customize working hours (default 9-18), lunch break (default 13-14), weekend availability toggle, and minimum focus duration.
+2. **PostgreSQL Persistence Layer**: Implement `PostgresCalendarStore(CalendarStore)` based on the defined relational schema in `THOUGHT_PROCESS.md` to replace in-memory mock store.
+3. **Date Range / Multi-Week Navigation**: Add Previous/Next week arrows and a mini-calendar picker for planning across multiple weeks.
+4. **Google Calendar Real-Time Webhooks**: Push notification listeners to sync external calendar modifications live into the grid without requiring manual refresh.
+
+
+

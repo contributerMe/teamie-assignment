@@ -1,0 +1,43 @@
+# ==============================================================================
+# Kairos Environment Configuration Template
+# Copy this file to .env and replace the placeholder values with your real keys.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Google Gemini AI Configuration
+# ------------------------------------------------------------------------------
+# Get your free API key at: https://aistudio.google.com/app/apikey
+# If left blank or invalid, Kairos will run in offline rule-based fallback mode.
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Gemini Model to use (default: gemini-3.5-flash-lite)
+# Fallbacks: gemini-4-hydrogen, gemini-3.8-flash
+GEMINI_MODEL=gemini-3.5-flash-lite
+
+# ------------------------------------------------------------------------------
+# 2. Calendar Backend Configuration
+# ------------------------------------------------------------------------------
+# Choose: "mock" or "google"
+# - "mock": Uses in-memory realistic seed data (default if token.json is absent)
+# - "google": Connects to live Google Calendar API via OAuth2
+# Leave blank for auto-detection (uses "google" if token.json exists, else "mock")
+CALENDAR_BACKEND=
+
+# ------------------------------------------------------------------------------
+# 3. Google Calendar Settings
+# ------------------------------------------------------------------------------
+# The calendar ID to inspect and modify.
+# For daily personal use, "primary" is standard.
+# For seeding demo data (via seed_google.py), DO NOT use "primary"; provide a test calendar ID.
+GOOGLE_CALENDAR_ID=primary
+
+# Set to "true" if you want Google Calendar to email invites to attendees
+# when events are created or updated. Default is "false" to prevent spamming teammates.
+SEND_INVITES=false
+
+# ------------------------------------------------------------------------------
+# 4. Server & Local Settings (Optional)
+# ------------------------------------------------------------------------------
+HOST=0.0.0.0
+PORT=8000
+TIMEZONE=Asia/Kolkata
